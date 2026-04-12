@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:5173/)",
+      "Bash(curl -s http://localhost:5173/src/main.js)",
+      "Bash(open:*)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/src/__TRACKED_VAR__)",
+      "mcp__ide__getDiagnostics",
+      "WebFetch(domain:localhost)",
+      "Bash(curl -s \"http://localhost:3001/socket.io/?EIO=4&transport=polling\")",
+      "Bash(timeout 5 node server/index.js)",
+      "Bash(node:*)"
+    ]
+  }
+}
