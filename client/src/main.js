@@ -1,21 +1,36 @@
 import * as THREE from 'three';
 import socket from './network/socket.js';
-import { createCar } from './train.js';
+import { createCar, HALF_LENGTH } from './train.js';
 import { createCarLighting } from './lighting.js';
 import { createPlayer } from './player.js';
 import { createDoors } from './doors.js';
 import { createTunnelView } from './windows.js';
-import { updateInteractables, Interactable } from './interactable.js';
+import { updateInteractables, Interactable, clearInteractables } from './interactable.js';
 import { createMenu } from './ui/menu.js';
 import { createHUD } from './ui/hud.js';
 import { Car1Puzzle } from './puzzles/car1.js';
-import { resumeAudio } from './audio/soundManager.js';
+import { resumeAudio, initAudio, startAmbientSound, updateAmbientSound, stopAmbientSound } from './audio/soundManager.js';
 import {
   addRemotePlayer,
   removeRemotePlayer,
   updateRemotePlayerPosition,
   updateRemotePlayers,
 } from './remotePlayers.js';
+
+// New immersion systems
+import { updateTension, setCurrentCar, getTensionLevel, getIntensityMultiplier } from './tension.js';
+import { playIntroSequence } from './intro.js';
+import { createIntercom } from './ui/intercom.js';
+import { createCarEnvironment } from './environment.js';
+import { createCarTransition } from './carTransition.js';
+import { wrongAnswerEffect } from './ui/screenEffects.js';
+import { disposeScreenEffects } from './ui/screenEffects.js';
+import { playWinEnding, playLoseEnding, buildScoreContent } from './ui/endings.js';
+
+// Visual polish systems
+import { createPostProcessing } from './postprocessing.js';
+import { createDustParticles } from './particles.js';
+import { createAdPanels } from './adPanels.js';
 
 // Game state
 let mySocketId = null;
@@ -32,10 +47,27 @@ let doors = null;
 let hud = null;
 let currentPuzzle = null;
 let gameKeyHandler = null;
+let resizeHandler = null;
+
+// New system instances
+let intercom = null;
+let carEnvironment = null;
+let carTransition = null;
+let introSequence = null;
+
+// Visual polish instances
+let postProcessing = null;
+let dustParticles = null;
+let adPanels = null;
 
 // Position sync throttle
 let syncTimer = 0;
 const SYNC_INTERVAL = 1 / 15;
+const _syncEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+
+// Station LED display (overhead in-car display)
+let stationLED = null;
+let lastStationIndex = 0;
 
 // Spawn positions per player index (back of Car 1)
 const SPAWN_POSITIONS = [
@@ -105,13 +137,23 @@ socket.on('player-moved', ({ socketId, position, rotation }) => {
 });
 
 socket.on('timer-update', (data) => {
+  // Update tension system
+  updateTension(data.elapsed, null);
+
   if (hud) {
-    hud.update(data.elapsed, data.totalTime, data.stationIndex, data.stations);
+    hud.update(data.elapsed, null, data.stationIndex, null);
+  }
+
+  // Station LED flash on station change
+  if (data.stationIndex > lastStationIndex) {
+    lastStationIndex = data.stationIndex;
+    flashStationLED(data.stationIndex);
   }
 });
 
-socket.on('game-over', () => {
+socket.on('game-over', (data) => {
   gameActive = false;
+  showGameOverScreen(data && data.won);
 });
 
 // --- Hint responses ---
@@ -121,20 +163,30 @@ socket.on('hint-response', (data) => {
   }
 });
 
+// --- Wrong answer effect (listen for puzzle validation failures) ---
+socket.on('puzzle-invalid', () => {
+  wrongAnswerEffect();
+});
+
+// --- Station LED flash ---
+function flashStationLED(stationIndex) {
+  if (!stationLED) return;
+  // Show station name briefly on the LED mesh
+  stationLED.visible = true;
+  setTimeout(() => {
+    if (stationLED) stationLED.visible = false;
+  }, 3000);
+}
+
 // --- Game init ---
-function startGame({ seed, players, timerState, puzzleLayout }) {
-  gameActive = true;
-
-  const me = players.find((p) => p.socketId === mySocketId);
-  myPlayerIndex = me ? me.index : 0;
-
+function startGame({ players, timerState, puzzleLayout }) {
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = false;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
 
   // Scene
@@ -196,6 +248,8 @@ function startGame({ seed, players, timerState, puzzleLayout }) {
   hud = createHUD();
   hud.show();
   if (timerState) {
+    hud.setTimerConfig(timerState.totalTime, timerState.stations);
+    updateTension(timerState.elapsed, timerState.totalTime);
     hud.update(
       timerState.elapsed,
       timerState.totalTime,
@@ -213,6 +267,35 @@ function startGame({ seed, players, timerState, puzzleLayout }) {
   hud.setHintCallback((tier) => {
     socket.emit('hint-request', { car: 1 });
   });
+
+  // --- Visual polish systems ---
+
+  // Post-processing (bloom, vignette, film grain)
+  postProcessing = createPostProcessing(renderer, scene, camera);
+
+  // Atmospheric dust particles
+  dustParticles = createDustParticles(scene);
+
+  // Procedural subway ad textures
+  adPanels = createAdPanels(scene);
+
+  // Kill one fluorescent tube in Car 1 for atmosphere (creates a dark zone)
+  lighting.killTube(2);
+
+  // --- Initialize new immersion systems ---
+
+  // Bomber intercom taunts
+  intercom = createIntercom();
+  setCurrentCar(1);
+
+  // Environmental storytelling (Car 1 — litter, stains, scuff marks)
+  carEnvironment = createCarEnvironment(scene, 1);
+
+  // Between-car transition corridor (at front door of Car 1)
+  carTransition = createCarTransition(scene, 'front');
+
+  // Station LED display (overhead in-car)
+  createStationLED(scene);
 
   // Keyboard interaction (remove previous listener if re-entering startGame)
   if (gameKeyHandler) document.removeEventListener('keydown', gameKeyHandler);
@@ -251,34 +334,157 @@ function startGame({ seed, players, timerState, puzzleLayout }) {
   };
   document.addEventListener('keydown', gameKeyHandler);
 
-  // Click-to-lock overlay
-  const clickPrompt = document.createElement('div');
-  clickPrompt.style.cssText =
-    'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
-    'background:rgba(0,0,0,0.6);z-index:200;cursor:pointer;' +
-    'font-family:monospace;color:#aaa;font-size:1.1rem;';
-  clickPrompt.textContent = 'Click to start';
-  document.body.appendChild(clickPrompt);
-  clickPrompt.addEventListener(
-    'click',
-    () => {
-      clickPrompt.remove();
-      renderer.domElement.requestPointerLock();
-      resumeAudio();
-    },
-    { once: true }
-  );
-
-  // Resize
-  window.addEventListener('resize', () => {
+  // Resize (remove previous if re-entering startGame)
+  if (resizeHandler) window.removeEventListener('resize', resizeHandler);
+  resizeHandler = () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+    if (postProcessing) postProcessing.resize(window.innerWidth, window.innerHeight);
+  };
+  window.addEventListener('resize', resizeHandler);
 
-  // Start loop
+  // Start clock
   clock = new THREE.Clock();
+  gameActive = true;
+
+  // --- Click-to-start (required for browser audio policy) → intro sequence → gameplay ---
+  player.setUIBlocking(true);
+
+  const clickPrompt = document.createElement('div');
+  clickPrompt.style.cssText =
+    'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
+    'background:rgba(0,0,0,0.85);z-index:1100;cursor:pointer;' +
+    'font-family:monospace;color:#aaa;font-size:1.1rem;';
+  clickPrompt.textContent = 'Click to start';
+  document.body.appendChild(clickPrompt);
+
+  // Start with all lights off (intro reveals them)
+  lighting.setAllOff();
+
+  clickPrompt.addEventListener('click', () => {
+    clickPrompt.remove();
+
+    // Initialize audio context (needs user gesture)
+    resumeAudio();
+    initAudio(camera);
+
+    // Play intro cinematic inside the dark 3D scene
+    introSequence = playIntroSequence(
+      // triggerLights — called when the corruption moment hits
+      () => lighting.triggerPowerOn(),
+      // onComplete — release controls, start gameplay
+      () => {
+        player.setUIBlocking(false);
+        introSequence = null;
+        startAmbientSound(camera);
+        renderer.domElement.requestPointerLock();
+      },
+    );
+  }, { once: true });
+
+  // Start animation loop immediately (renders behind overlays)
   animate();
+}
+
+// --- Station LED display (overhead scrolling display inside car) ---
+function createStationLED(scene) {
+  // Simple text plane that shows station name when passing
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, 512, 64);
+  ctx.fillStyle = '#ff8800';
+  ctx.font = 'bold 28px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('NEXT STATION', 256, 40);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.MeshStandardMaterial({
+    map: texture,
+    emissive: 0xff6600,
+    emissiveIntensity: 0.3,
+    emissiveMap: texture,
+  });
+  const geo = new THREE.PlaneGeometry(1.2, 0.15);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(0, 2.1, 0);
+  mesh.visible = false;
+  scene.add(mesh);
+
+  stationLED = mesh;
+  stationLED.userData.canvas = canvas;
+  stationLED.userData.ctx = ctx;
+  stationLED.userData.texture = texture;
+}
+
+function cleanupGame() {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler);
+    resizeHandler = null;
+  }
+  if (gameKeyHandler) {
+    document.removeEventListener('keydown', gameKeyHandler);
+    gameKeyHandler = null;
+  }
+  if (player && player.dispose) player.dispose();
+  if (currentPuzzle && currentPuzzle.dispose) currentPuzzle.dispose();
+  if (hud) hud.hide();
+  clearInteractables();
+
+  // Cleanup new systems
+  if (intercom) { intercom.dispose(); intercom = null; }
+  if (carEnvironment) { carEnvironment.dispose(); carEnvironment = null; }
+  if (carTransition) { carTransition.dispose(); carTransition = null; }
+  if (introSequence) { introSequence.skip(); introSequence = null; }
+  if (dustParticles) { dustParticles.dispose(); dustParticles = null; }
+  if (adPanels) { adPanels.dispose(); adPanels = null; }
+  if (postProcessing) {
+    postProcessing.composer.renderTarget1.dispose();
+    postProcessing.composer.renderTarget2.dispose();
+    postProcessing = null;
+  }
+  disposeScreenEffects();
+
+  lastStationIndex = 0;
+  if (stationLED) {
+    if (stationLED.parent) stationLED.parent.remove(stationLED);
+    stationLED.geometry.dispose();
+    stationLED.material.dispose();
+    stationLED.userData.texture.dispose();
+    stationLED = null;
+  }
+}
+
+function showGameOverScreen(won) {
+  cleanupGame();
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  const onReturn = () => {
+    stopAmbientSound();
+    if (renderer && renderer.domElement.parentElement) {
+      renderer.domElement.remove();
+    }
+    renderer = null;
+    scene = null;
+    camera = null;
+    player = null;
+    currentPuzzle = null;
+    hud = null;
+    menu.showMain();
+  };
+
+  if (won) {
+    playWinEnding((scoreContainer, overlay) => {
+      buildScoreContent(scoreContainer, overlay, true, onReturn);
+    });
+  } else {
+    playLoseEnding((scoreContainer, overlay) => {
+      buildScoreContent(scoreContainer, overlay, false, onReturn);
+    });
+  }
 }
 
 function animate() {
@@ -287,30 +493,144 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
 
   player.update(dt);
-  lighting.update(dt);
-  tunnel.update(dt);
+
+  // Update lighting with tension-based flicker intensity
+  updateLightingWithTension(dt);
+
+  // Update tunnel with tension-based speed
+  updateTunnelWithTension(dt);
+
   doors.update(dt);
   if (currentPuzzle) currentPuzzle.update(dt);
   updateInteractables(camera, scene);
-  updateRemotePlayers(dt);
+  updateRemotePlayers(dt, camera.position);
+
+  // New system updates
+  updateAmbientSound(dt);
+  if (intercom) intercom.update(dt);
+  if (carEnvironment) carEnvironment.update(dt);
+  if (carTransition) {
+    carTransition.update(dt, camera.position.z);
+    carTransition.checkPlayerPosition(camera.position.z, -HALF_LENGTH, -HALF_LENGTH - 2.5);
+  }
+
+  // Dust particles (opacity tracks lit tubes)
+  if (dustParticles) dustParticles.update(dt, lighting ? lighting.tubes : null);
+
+  // Post-processing tension modulation
+  if (postProcessing) {
+    postProcessing.update(dt);
+    postProcessing.setTension(getTensionLevel());
+  }
 
   // Sync position to server at 15 fps
   syncTimer += dt;
   if (syncTimer >= SYNC_INTERVAL) {
     syncTimer = 0;
-    const euler = new THREE.Euler().setFromQuaternion(
-      camera.quaternion,
-      'YXZ'
-    );
+    _syncEuler.setFromQuaternion(camera.quaternion, 'YXZ');
     socket.emit('player-move', {
       position: {
         x: camera.position.x,
         y: camera.position.y,
         z: camera.position.z,
       },
-      rotation: { y: euler.y, x: euler.x },
+      rotation: { y: _syncEuler.y, x: _syncEuler.x },
     });
   }
 
-  renderer.render(scene, camera);
+  // Render through post-processing pipeline
+  if (postProcessing) {
+    postProcessing.render();
+  } else {
+    renderer.render(scene, camera);
+  }
+}
+
+// --- Tension-reactive lighting ---
+// Pre-allocated color objects to avoid per-frame GC pressure
+const _ambientColorA = new THREE.Color(0x403828);
+const _ambientColorB = new THREE.Color(0x4a1515);
+const _fogColorA = new THREE.Color(0x0a0a08);
+const _fogColorB = new THREE.Color(0x150505);
+const _lerpColor = new THREE.Color();
+
+function updateLightingWithTension(dt) {
+  if (!lighting) return;
+
+  const intensity = getIntensityMultiplier();
+  const tension = getTensionLevel();
+
+  // Update flicker behavior based on tension
+  for (const tube of lighting.tubes) {
+    if (tube.dead) continue;
+
+    // Let lighting.js handle powering-on phase (intro stutter)
+    if (tube.flickerPhase === 'powering-on' || tube.flickerPhase === 'off') {
+      // Only increment timer for these phases — lighting.update handles the logic
+      continue;
+    }
+
+    tube.flickerTimer += dt;
+
+    switch (tube.flickerPhase) {
+      case 'steady':
+        // Flicker more frequently at higher tension
+        if (tube.flickerTimer >= tube.nextFlicker / intensity) {
+          tube.flickerPhase = 'flickering';
+          tube.flickerTimer = 0;
+          tube.flickerDuration = (Math.random() * 0.6 + 0.1) * intensity;
+        }
+        break;
+
+      case 'flickering': {
+        const flickRate = Math.sin(tube.flickerTimer * 40) > 0;
+        tube.on = flickRate;
+        tube.light.intensity = flickRate ? tube.baseIntensity : 0.05;
+        tube.material.emissiveIntensity = flickRate ? 1.5 : 0.05;
+
+        if (tube.flickerTimer >= tube.flickerDuration) {
+          tube.flickerPhase = 'steady';
+          tube.flickerTimer = 0;
+          tube.nextFlicker = Math.random() * 5 + 2;
+          tube.on = true;
+          tube.light.intensity = tube.baseIntensity;
+          tube.material.emissiveIntensity = 1.5;
+        }
+        break;
+      }
+    }
+  }
+
+  // Also run lighting.update for powering-on/off phases (intro sequence)
+  lighting.update(dt);
+
+  // Red emergency lighting blend at high tension
+  if (tension > 0.5) {
+    const redBlend = (tension - 0.5) * 2; // 0 to 1 over the second half
+    _lerpColor.copy(_ambientColorA).lerp(_ambientColorB, redBlend);
+    lighting.ambientLight.color.copy(_lerpColor);
+    lighting.ambientLight.intensity = 0.6 - redBlend * 0.2;
+
+    // Fog gets denser and redder
+    if (scene.fog) {
+      _lerpColor.copy(_fogColorA).lerp(_fogColorB, redBlend);
+      scene.fog.color.copy(_lerpColor);
+      scene.fog.density = 0.025 + redBlend * 0.015;
+    }
+  }
+
+  // Tone mapping exposure drops as tension rises (darker feel)
+  if (renderer) {
+    renderer.toneMappingExposure = 1.0 - tension * 0.2;
+  }
+}
+
+// --- Tension-reactive tunnel ---
+function updateTunnelWithTension(dt) {
+  if (!tunnel) return;
+
+  // Base update at tension-adjusted speed
+  const speedMultiplier = 1 + getTensionLevel() * 0.8;
+  // Override the tunnel's internal scroll speed by calling update with adjusted dt
+  tunnel.update(dt * speedMultiplier);
 }

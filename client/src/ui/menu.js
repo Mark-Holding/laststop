@@ -1,3 +1,5 @@
+import { startMenuBackground, stopMenuBackground } from './menuBackground.js';
+
 export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
   let currentPlayers = [];
   let currentHostId = null;
@@ -9,15 +11,24 @@ export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
     #menu-overlay{
       position:fixed;inset:0;z-index:1000;
       display:flex;align-items:center;justify-content:center;
-      background:#0a0a0a;
+      background:transparent;
       font-family:'Courier New',Courier,monospace;
     }
-    .menu-box{width:100%;max-width:420px;padding:40px 32px;text-align:center}
+    .menu-box{
+      width:100%;max-width:420px;padding:40px 32px;text-align:center;
+      background:rgba(5,5,5,0.85);border-radius:4px;
+      border:1px solid rgba(255,255,255,0.04)
+    }
     .menu-title{
       font-size:2.5rem;color:#e8dcc8;letter-spacing:0.3em;
       text-transform:uppercase;margin-bottom:4px;font-weight:normal
     }
-    .menu-subtitle{font-size:0.85rem;color:#555;margin-bottom:40px}
+    .menu-subtitle{font-size:0.85rem;color:#555;margin-bottom:20px}
+    .menu-premise{
+      font-size:0.8rem;color:#666;line-height:1.7;
+      margin-bottom:32px;padding:0 8px;text-align:center
+    }
+    .menu-premise strong{color:#cc8833}
     .menu-input{
       width:100%;padding:12px 16px;margin-bottom:16px;
       background:#141414;border:1px solid #333;border-radius:3px;
@@ -76,6 +87,10 @@ export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
       <div id="screen-menu" class="menu-screen active">
         <h1 class="menu-title">Last Stop</h1>
         <p class="menu-subtitle">A multiplayer co-op escape room</p>
+        <p class="menu-premise">
+          A bomber has hijacked a subway train headed for a rigged station.<br>
+          Work together to solve puzzles car by car and <strong>reach the driver's cabin before time runs out</strong>.
+        </p>
         <input class="menu-input" id="username-input" type="text"
                placeholder="Enter your name" maxlength="16"
                autocomplete="off" spellcheck="false">
@@ -108,6 +123,7 @@ export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
     </div>
   `;
   document.body.appendChild(overlay);
+  startMenuBackground();
 
   const screenMenu = overlay.querySelector('#screen-menu');
   const screenLobby = overlay.querySelector('#screen-lobby');
@@ -249,6 +265,17 @@ export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
 
     hideAll() {
       overlay.style.display = 'none';
+      stopMenuBackground();
+    },
+
+    showMain() {
+      overlay.style.display = 'flex';
+      showScreen('menu');
+      menuError.textContent = '';
+      usernameInput.value = '';
+      joinPanelOpen = false;
+      joinPanel.style.display = 'none';
+      startMenuBackground();
     },
   };
 }

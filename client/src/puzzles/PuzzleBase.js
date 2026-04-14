@@ -18,6 +18,13 @@ export class PuzzleBase {
     this.disposed = true;
     for (const obj of this.objects) {
       this.scene.remove(obj);
+      obj.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (child.material.map) child.material.map.dispose();
+          child.material.dispose();
+        }
+      });
     }
     this.objects = [];
   }

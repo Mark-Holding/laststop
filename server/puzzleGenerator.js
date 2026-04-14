@@ -141,13 +141,32 @@ export function generateCar1(seed) {
   };
 }
 
+// Convert lock pattern indices to visual line segments for the client.
+// This exposes the scratch *appearance* without revealing which grid dots
+// are part of the answer or their order.
+function patternToScratchLines(pattern) {
+  const cols = [0.25, 0.5, 0.75];
+  const rows = [0.25, 0.5, 0.75];
+  const dotPos = (idx) => ({ x: cols[idx % 3], y: rows[Math.floor(idx / 3)] });
+
+  const segments = [];
+  for (let i = 1; i < pattern.length; i++) {
+    const a = dotPos(pattern[i - 1]);
+    const b = dotPos(pattern[i]);
+    segments.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+  }
+  // Include which dots are highlighted (but NOT the order)
+  const highlightedDots = [...new Set(pattern)].sort((a, b) => a - b);
+  return { segments, highlightedDots };
+}
+
 export function getCar1Layout(config) {
   return {
     phonePos: config.phonePos,
     phoneSeatIndex: config.phoneSeatIndex,
     scratchSide: config.scratchSide,
     scratchWindowIdx: config.scratchWindowIdx,
-    scratchPattern: config.lockPattern,
+    scratchVisual: patternToScratchLines(config.lockPattern),
     compartmentIndex: config.compartmentIndex,
     targetTag: config.targetTag,
     stickerCode: config.stickerCodePart,
@@ -170,4 +189,3 @@ export function createCar1State() {
   };
 }
 
-export { mulberry32 };

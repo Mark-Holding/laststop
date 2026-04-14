@@ -36,23 +36,21 @@ export function createPlayer(camera, domElement) {
   });
 
   // Mouse look
-  document.addEventListener('mousemove', (event) => {
+  const onMouseMove = (event) => {
     if (!isLocked) return;
     euler.setFromQuaternion(camera.quaternion);
     euler.y -= event.movementX * MOUSE_SENSITIVITY;
     euler.x -= event.movementY * MOUSE_SENSITIVITY;
     euler.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, euler.x));
     camera.quaternion.setFromEuler(euler);
-  });
+  };
+  document.addEventListener('mousemove', onMouseMove);
 
   // Keyboard
-  document.addEventListener('keydown', (event) => {
-    keys[event.code] = true;
-  });
-
-  document.addEventListener('keyup', (event) => {
-    keys[event.code] = false;
-  });
+  const onKeyDown = (event) => { keys[event.code] = true; };
+  const onKeyUp = (event) => { keys[event.code] = false; };
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
 
   // Crosshair
   const crosshair = document.createElement('div');
@@ -73,7 +71,7 @@ export function createPlayer(camera, domElement) {
     forward.normalize();
 
     const right = new THREE.Vector3();
-    right.crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
     if (keys['KeyW']) moveDir.add(forward);
     if (keys['KeyS']) moveDir.sub(forward);
@@ -109,5 +107,12 @@ export function createPlayer(camera, domElement) {
     }
   }
 
-  return { update, getPosition, get isLocked() { return isLocked; }, setUIBlocking };
+  function dispose() {
+    document.removeEventListener('mousemove', onMouseMove);
+    document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keyup', onKeyUp);
+    if (crosshair.parentElement) crosshair.remove();
+  }
+
+  return { update, getPosition, get isLocked() { return isLocked; }, setUIBlocking, dispose };
 }

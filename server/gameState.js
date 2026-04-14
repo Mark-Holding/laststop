@@ -8,6 +8,7 @@ export function createGameState(seed) {
     currentCar: 1,
     startTime: Date.now(),
     hintsUsed: {},
+    totalHintPenalty: 0,
     puzzleConfigs: {
       car1: car1Config,
     },

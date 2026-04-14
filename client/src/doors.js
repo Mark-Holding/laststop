@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { HALF_LENGTH, CAR_HEIGHT } from './train.js';
+import { playDoorUnlock, playDoorSlide } from './audio/soundManager.js';
 
 const DOOR_WIDTH = 0.85;
 const DOOR_HEIGHT = 1.9;
@@ -74,12 +75,18 @@ export function createDoors(scene) {
     door.locked = false;
     door.statusLight.material = unlockedLightMat.clone();
     door.glow.color.set(0x00ff44);
+
+    // Heavy mechanical CLUNK
+    playDoorUnlock();
   }
 
   function openDoor(which) {
     const door = which === 'front' ? frontDoor : backDoor;
     if (door.locked || door.open) return;
     door.open = true;
+
+    // Hydraulic slide sound
+    playDoorSlide();
   }
 
   function update(dt) {

@@ -1,3 +1,5 @@
+import { playStationDing, playStaticBurst } from '../audio/soundManager.js';
+
 export function createHUD() {
   const style = document.createElement('style');
   style.textContent = `
@@ -111,6 +113,9 @@ export function createHUD() {
   let stationDots = [];
   let stationLabels = [];
   let builtStations = false;
+  let storedTotalTime = 1800;
+  let storedStations = null;
+  let lastStationIndex = 0;
 
   function buildStations(stations) {
     if (builtStations) return;
@@ -136,9 +141,26 @@ export function createHUD() {
     });
   }
 
+  function setTimerConfig(totalTime, stations) {
+    storedTotalTime = totalTime;
+    storedStations = stations;
+    if (stations) buildStations(stations);
+  }
+
   function update(elapsed, totalTime, stationIndex, stations) {
-    if (stations && !builtStations) {
-      buildStations(stations);
+    // Accept totalTime/stations from initial call, fall back to stored values
+    const tt = totalTime || storedTotalTime;
+    const st = stations || storedStations;
+    if (st && !builtStations) {
+      buildStations(st);
+    }
+
+    // Play station ding when passing a new station
+    if (stationIndex > lastStationIndex) {
+      const totalStations = stationDots.length;
+      const isLate = totalStations > 0 && stationIndex >= totalStations - 3;
+      playStationDing(isLate);
+      lastStationIndex = stationIndex;
     }
 
     stationDots.forEach((dot, i) => {
@@ -150,10 +172,10 @@ export function createHUD() {
       label.classList.toggle('active', i === stationIndex);
     });
 
-    const progress = Math.min(elapsed / totalTime, 1);
+    const progress = Math.min(elapsed / tt, 1);
     marker.style.left = (5 + progress * 90) + '%';
 
-    const remaining = Math.max(0, totalTime - elapsed);
+    const remaining = Math.max(0, tt - elapsed);
     const minutes = Math.floor(remaining / 60);
     const seconds = Math.floor(remaining % 60);
     timerEl.textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
@@ -217,10 +239,16 @@ export function createHUD() {
         btn.disabled = true;
       }
     });
+
+    // Intercom crackle before hint text appears
+    playStaticBurst(0.8);
     hintTextEl.style.display = 'block';
-    hintTextEl.textContent = text;
-    hintPenaltyEl.textContent = `+${penalty}s added to score`;
-    setTimeout(() => { hintPenaltyEl.textContent = ''; }, 4000);
+    hintTextEl.textContent = '...';
+    setTimeout(() => {
+      hintTextEl.textContent = text;
+      hintPenaltyEl.textContent = `+${penalty}s added to score`;
+    }, 800);
+    setTimeout(() => { hintPenaltyEl.textContent = ''; }, 5000);
   }
 
   return {
@@ -234,6 +262,7 @@ export function createHUD() {
       hintPanel.style.display = 'none';
     },
     update,
+    setTimerConfig,
     setHintCallback,
     showHint,
     toggleHintPanel() {

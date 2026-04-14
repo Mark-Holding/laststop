@@ -1,18 +1,36 @@
 const rooms = new Map();
 
 const PLAYER_COLORS = ['#4488ff', '#ff4444', '#44cc44', '#ffaa22'];
+const ROOM_TTL_MS = 60 * 60 * 1000; // 1 hour max room lifetime
+const FINISHED_TTL_MS = 5 * 60 * 1000; // 5 min after game ends
 
 function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code;
-  do {
-    code = '';
+  const maxAttempts = 100;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let code = '';
     for (let i = 0; i < 4; i++) {
       code += chars[Math.floor(Math.random() * chars.length)];
     }
-  } while (rooms.has(code));
-  return code;
+    if (!rooms.has(code)) return code;
+  }
+  throw new Error('Failed to generate unique room code');
 }
+
+// Clean up stale and finished rooms periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    const age = now - room.createdAt;
+    if (room.state === 'finished' && age > FINISHED_TTL_MS) {
+      if (room.timerInterval) clearInterval(room.timerInterval);
+      rooms.delete(code);
+    } else if (age > ROOM_TTL_MS) {
+      if (room.timerInterval) clearInterval(room.timerInterval);
+      rooms.delete(code);
+    }
+  }
+}, 60000);
 
 export function createRoom(hostSocketId, username) {
   const code = generateCode();
@@ -20,6 +38,7 @@ export function createRoom(hostSocketId, username) {
     code,
     hostId: hostSocketId,
     state: 'waiting',
+    createdAt: Date.now(),
     players: [{ socketId: hostSocketId, username, color: PLAYER_COLORS[0], index: 0 }],
     seed: null,
     timerInterval: null,

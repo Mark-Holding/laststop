@@ -10,7 +10,13 @@
       "WebFetch(domain:localhost)",
       "Bash(curl -s \"http://localhost:3001/socket.io/?EIO=4&transport=polling\")",
       "Bash(timeout 5 node server/index.js)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(xxd:*)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(xargs kill:*)",
+      "Bash(ls:*)",
+      "Bash(kill %1)",
+      "Bash(lsof -ti:5173,5174,5175,5176,5177,5178,3001)"
     ]
   }
 }

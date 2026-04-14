@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PuzzleBase } from './PuzzleBase.js';
 import { Interactable } from '../interactable.js';
 import { getAudioListener, resumeAudio } from '../audio/soundManager.js';
 
@@ -66,29 +67,28 @@ function windowWorldPos(side, windowIdx) {
 
 // --- Textures ---
 
-function createScratchTexture(pattern) {
+function createScratchTexture(scratchVisual) {
   const canvas = document.createElement('canvas');
   canvas.width = 256;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
 
-  const cols = [64, 128, 192];
-  const rows = [64, 128, 192];
-  const dotPos = (idx) => ({ x: cols[idx % 3], y: rows[Math.floor(idx / 3)] });
+  const { segments, highlightedDots } = scratchVisual;
 
-  // Scratch lines
+  // Scratch lines from pre-computed segments (no answer order exposed)
   ctx.strokeStyle = 'rgba(220, 220, 200, 0.55)';
   ctx.lineWidth = 3.5;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  for (let i = 0; i < pattern.length; i++) {
-    const p = dotPos(pattern[i]);
-    // Add slight jitter for scratch look
-    const jx = (Math.sin(i * 7.3) * 2);
-    const jy = (Math.cos(i * 5.1) * 2);
-    if (i === 0) ctx.moveTo(p.x + jx, p.y + jy);
-    else ctx.lineTo(p.x + jx, p.y + jy);
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const x1 = seg.x1 * 256, y1 = seg.y1 * 256;
+    const x2 = seg.x2 * 256, y2 = seg.y2 * 256;
+    const jx1 = Math.sin(i * 7.3) * 2, jy1 = Math.cos(i * 5.1) * 2;
+    const jx2 = Math.sin((i + 1) * 7.3) * 2, jy2 = Math.cos((i + 1) * 5.1) * 2;
+    if (i === 0) ctx.moveTo(x1 + jx1, y1 + jy1);
+    ctx.lineTo(x2 + jx2, y2 + jy2);
   }
   ctx.stroke();
 
@@ -96,21 +96,26 @@ function createScratchTexture(pattern) {
   ctx.strokeStyle = 'rgba(255, 255, 240, 0.3)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  for (let i = 0; i < pattern.length; i++) {
-    const p = dotPos(pattern[i]);
-    const jx = (Math.sin(i * 7.3 + 1) * 3);
-    const jy = (Math.cos(i * 5.1 + 1) * 3);
-    if (i === 0) ctx.moveTo(p.x + jx, p.y + jy);
-    else ctx.lineTo(p.x + jx, p.y + jy);
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const x1 = seg.x1 * 256, y1 = seg.y1 * 256;
+    const x2 = seg.x2 * 256, y2 = seg.y2 * 256;
+    const jx1 = Math.sin(i * 7.3 + 1) * 3, jy1 = Math.cos(i * 5.1 + 1) * 3;
+    const jx2 = Math.sin((i + 1) * 7.3 + 1) * 3, jy2 = Math.cos((i + 1) * 5.1 + 1) * 3;
+    if (i === 0) ctx.moveTo(x1 + jx1, y1 + jy1);
+    ctx.lineTo(x2 + jx2, y2 + jy2);
   }
   ctx.stroke();
 
   // Dots at grid positions
+  const cols = [64, 128, 192];
+  const rows = [64, 128, 192];
   for (let i = 0; i < 9; i++) {
-    const p = dotPos(i);
+    const px = cols[i % 3], py = rows[Math.floor(i / 3)];
+    const isHighlighted = highlightedDots.includes(i);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, pattern.includes(i) ? 5 : 3, 0, Math.PI * 2);
-    ctx.fillStyle = pattern.includes(i)
+    ctx.arc(px, py, isHighlighted ? 5 : 3, 0, Math.PI * 2);
+    ctx.fillStyle = isHighlighted
       ? 'rgba(255, 255, 240, 0.5)'
       : 'rgba(200, 200, 190, 0.15)';
     ctx.fill();
@@ -489,16 +494,10 @@ function createCodeEntryUI(stickerCode, onSubmit) {
 // CAR 1 PUZZLE — "The Dead Phone"
 // =========================================================
 
-export class Car1Puzzle {
+export class Car1Puzzle extends PuzzleBase {
   constructor(scene, camera, socket, layout, playerController, doors) {
-    this.scene = scene;
-    this.camera = camera;
-    this.socket = socket;
-    this.layout = layout;
-    this.player = playerController;
-    this.doors = doors;
+    super(scene, camera, socket, layout, playerController, doors);
 
-    this.objects = [];
     this.interactables = [];
     this.seatMeshMap = new Map(); // seatIndex → cushion mesh
     this.seatInteractables = new Map(); // seatIndex → Interactable
@@ -526,12 +525,6 @@ export class Car1Puzzle {
     this.textsUI = null;
     this.codeEntryUI = null;
 
-    // Audio
-    this.audioListener = null;
-    this.buzzOsc = null;
-    this.buzzGain = null;
-    this.buzzStarted = false;
-
     this.init();
   }
 
@@ -543,7 +536,6 @@ export class Car1Puzzle {
     this.createScratchMarks();
     this.createHiddenNumber();
     this.createKeycardReader();
-    this.setupAudio();
     this.setupUI();
     this.setupSocketListeners();
   }
@@ -574,6 +566,7 @@ export class Car1Puzzle {
       const seatIdx = i;
       const interactable = new Interactable(zone, {
         onInteract: () => this.handleSeatInteract(seatIdx),
+        label: 'Press E to lift seat',
       });
       this.interactables.push(interactable);
       this.seatInteractables.set(seatIdx, interactable);
@@ -610,6 +603,7 @@ export class Car1Puzzle {
     // Phone interactable (only active when visible)
     this.phoneInteractable = new Interactable(this.phoneMesh, {
       onInteract: () => this.handlePhoneInteract(),
+      label: 'Press E to grab phone',
     });
     this.interactables.push(this.phoneInteractable);
   }
@@ -710,6 +704,7 @@ export class Car1Puzzle {
 
       const interactable = new Interactable(zone, {
         onInteract: () => this.handleCompartmentInteract(compIdx),
+        label: 'Press E to open compartment',
       });
       this.interactables.push(interactable);
     }
@@ -717,10 +712,10 @@ export class Car1Puzzle {
 
   // --- Window scratch marks ---
   createScratchMarks() {
-    const { scratchSide, scratchWindowIdx, scratchPattern } = this.layout;
+    const { scratchSide, scratchWindowIdx, scratchVisual } = this.layout;
     const pos = windowWorldPos(scratchSide, scratchWindowIdx);
 
-    const texture = createScratchTexture(scratchPattern);
+    const texture = createScratchTexture(scratchVisual);
     const scratchGeo = new THREE.PlaneGeometry(WINDOW_WIDTH * 0.8, WINDOW_HEIGHT * 0.8);
     const scratchMat = new THREE.MeshBasicMaterial({
       map: texture,
@@ -807,46 +802,73 @@ export class Car1Puzzle {
 
     this.keycardReaderInteractable = new Interactable(reader, {
       onInteract: () => this.handleSwipeInteract(),
+      label: 'Press E to swipe keycard',
     });
     this.interactables.push(this.keycardReaderInteractable);
   }
 
-  // --- Proximity audio (phone buzz) ---
+  // --- Proximity audio (muffled phone vibration) ---
   setupAudio() {
     try {
       this.audioListener = getAudioListener(this.camera);
       resumeAudio();
       const ctx = this.audioListener.context;
 
-      // Create oscillators for buzz
+      // Vibration motor: low sine rumble
       this.buzzOsc = ctx.createOscillator();
-      this.buzzOsc.type = 'sawtooth';
-      this.buzzOsc.frequency.value = 150;
+      this.buzzOsc.type = 'sine';
+      this.buzzOsc.frequency.value = 55;
 
-      const buzzOsc2 = ctx.createOscillator();
-      buzzOsc2.type = 'square';
-      buzzOsc2.frequency.value = 30;
+      // Second harmonic for body
+      const osc2 = ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = 110;
+      const osc2Gain = ctx.createGain();
+      osc2Gain.gain.value = 0.3;
+      osc2.connect(osc2Gain);
 
+      // Rattle noise: filtered noise for the "phone on hard surface" texture
+      const noiseSize = ctx.sampleRate * 2;
+      const noiseBuffer = ctx.createBuffer(1, noiseSize, ctx.sampleRate);
+      const noiseData = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseSize; i++) {
+        noiseData[i] = Math.random() * 2 - 1;
+      }
+      this.buzzNoise = ctx.createBufferSource();
+      this.buzzNoise.buffer = noiseBuffer;
+      this.buzzNoise.loop = true;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.value = 0.08;
+      this.buzzNoise.connect(noiseGain);
+
+      // Merge into output gain
       this.buzzGain = ctx.createGain();
       this.buzzGain.gain.value = 0;
-
-      // Merge both oscillators into gain
       this.buzzOsc.connect(this.buzzGain);
-      buzzOsc2.connect(this.buzzGain);
+      osc2Gain.connect(this.buzzGain);
+      noiseGain.connect(this.buzzGain);
+
+      // Low-pass filter: muffled under a seat
+      const lpf = ctx.createBiquadFilter();
+      lpf.type = 'lowpass';
+      lpf.frequency.value = 280;
+      lpf.Q.value = 1.2;
+      this.buzzGain.connect(lpf);
 
       // Create PositionalAudio for spatial effect
       this.buzzSound = new THREE.PositionalAudio(this.audioListener);
       this.buzzSound.setRefDistance(1.5);
       this.buzzSound.setMaxDistance(12);
       this.buzzSound.setRolloffFactor(1.5);
-      this.buzzSound.setVolume(0.4);
+      this.buzzSound.setVolume(0.5);
 
-      // Connect gain → positional audio panner
-      this.buzzGain.connect(this.buzzSound.panner);
+      // Connect filter → positional audio panner
+      lpf.connect(this.buzzSound.panner);
 
       this.buzzOsc.start();
-      buzzOsc2.start();
-      this.buzzOsc2 = buzzOsc2;
+      osc2.start();
+      this.buzzNoise.start();
+      this.buzzOsc2 = osc2;
       this.buzzStarted = true;
 
       // Attach to phone position
@@ -958,6 +980,7 @@ export class Car1Puzzle {
       case 'wrong-compartment':
         this.showToast('Wrong compartment — look for the right tag', '#ff4444');
         this.codeEntryUI.hide();
+        this.player.setUIBlocking(false);
         break;
 
       case 'code-wrong':
@@ -1037,20 +1060,14 @@ export class Car1Puzzle {
     }
     if (this.state.compartmentOpen) {
       // Compartment already open — take keycard
-      if (
-        compIdx === this.layout.compartmentIndex &&
-        !this.state.keycardTaken
-      ) {
+      if (!this.state.keycardTaken) {
         this.socket.emit('puzzle-action', { car: 1, type: 'take-keycard' });
       }
       return;
     }
-    if (compIdx === this.layout.compartmentIndex) {
-      this.player.setUIBlocking(true);
-      this.codeEntryUI.show(compIdx, this.layout.stickerCode);
-    } else {
-      this.showToast('This compartment has no lock. Not this one.', '#888');
-    }
+    // Show code entry UI — let the server determine if it's the right compartment
+    this.player.setUIBlocking(true);
+    this.codeEntryUI.show(compIdx, this.layout.stickerCode);
   }
 
   handleSwipeInteract() {
@@ -1104,6 +1121,7 @@ export class Car1Puzzle {
     this.objects.push(this.keycardMesh);
 
     const interactable = new Interactable(this.keycardMesh, {
+      label: 'Press E to take keycard',
       onInteract: () => {
         if (!this.state.keycardTaken) {
           this.socket.emit('puzzle-action', { car: 1, type: 'take-keycard' });
@@ -1120,7 +1138,7 @@ export class Car1Puzzle {
       const ctx = this.audioListener.context;
       this.buzzGain.gain.setTargetAtTime(0, ctx.currentTime, 0.05);
     }
-    // Stop oscillators to free CPU
+    // Stop all sources to free CPU
     if (this.buzzOsc) {
       try { this.buzzOsc.stop(); } catch (e) {}
       this.buzzOsc = null;
@@ -1128,6 +1146,10 @@ export class Car1Puzzle {
     if (this.buzzOsc2) {
       try { this.buzzOsc2.stop(); } catch (e) {}
       this.buzzOsc2 = null;
+    }
+    if (this.buzzNoise) {
+      try { this.buzzNoise.stop(); } catch (e) {}
+      this.buzzNoise = null;
     }
     this.buzzStarted = false;
   }
@@ -1150,7 +1172,8 @@ export class Car1Puzzle {
   // --- Update loop ---
 
   update(dt) {
-    // Buzz pattern (on/off vibration cycle)
+    // Phone vibration pattern: buzz-buzz ... pause ... (like a real incoming call)
+    // Pattern over 3s cycle: on 0-0.4, off 0.4-0.55, on 0.55-0.95, off 0.95-3.0
     if (
       this.buzzStarted &&
       !this.state.phoneGrabbedBy &&
@@ -1159,12 +1182,12 @@ export class Car1Puzzle {
       const ctx = this.audioListener.context;
       if (ctx.state === 'running') {
         const time = ctx.currentTime;
-        const cycle = time % 2.0;
-        const buzzing = cycle < 0.3 || (cycle >= 0.4 && cycle < 0.7);
+        const cycle = time % 3.0;
+        const vibrating = (cycle < 0.4) || (cycle >= 0.55 && cycle < 0.95);
         this.buzzGain.gain.setTargetAtTime(
-          buzzing ? 0.3 : 0.0,
+          vibrating ? 0.25 : 0.0,
           time,
-          0.015
+          vibrating ? 0.01 : 0.03
         );
       }
     }
@@ -1226,11 +1249,8 @@ export class Car1Puzzle {
     }
     this.interactables = [];
 
-    // Remove 3D objects
-    for (const obj of this.objects) {
-      this.scene.remove(obj);
-    }
-    this.objects = [];
+    // Remove 3D objects and dispose geometries/materials (via PuzzleBase)
+    super.dispose();
 
     // Remove UI DOM elements
     if (this.lockPatternUI && this.lockPatternUI.el) {

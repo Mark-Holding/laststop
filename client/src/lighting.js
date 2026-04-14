@@ -56,29 +56,20 @@ export function createCarLighting(scene) {
 
   function update(dt) {
     for (const tube of tubes) {
-      tube.flickerTimer += dt;
+      if (tube.dead) continue;
 
-      switch (tube.flickerPhase) {
-        case 'steady':
-          if (tube.flickerTimer >= tube.nextFlicker) {
-            tube.flickerPhase = 'flickering';
-            tube.flickerTimer = 0;
-            tube.flickerDuration = Math.random() * 0.6 + 0.1;
-          }
-          break;
+      // Only handle powering-on phase here; steady/flickering are managed
+      // by the tension system in main.js to avoid double-ticking
+      if (tube.flickerPhase === 'powering-on') {
+        tube.flickerTimer += dt;
+        const flickRate = Math.sin(tube.flickerTimer * 50) > 0;
+        setTubeState(tube, flickRate);
 
-        case 'flickering': {
-          // Rapid on/off during flicker
-          const flickRate = Math.sin(tube.flickerTimer * 40) > 0;
-          setTubeState(tube, flickRate);
-
-          if (tube.flickerTimer >= tube.flickerDuration) {
-            tube.flickerPhase = 'steady';
-            tube.flickerTimer = 0;
-            tube.nextFlicker = Math.random() * 5 + 2;
-            setTubeState(tube, true);
-          }
-          break;
+        if (tube.flickerTimer >= tube.flickerDuration) {
+          tube.flickerPhase = 'steady';
+          tube.flickerTimer = 0;
+          tube.nextFlicker = Math.random() * 4 + 2;
+          setTubeState(tube, true);
         }
       }
     }
@@ -90,5 +81,43 @@ export function createCarLighting(scene) {
     tube.material.emissiveIntensity = on ? 1.5 : 0.05;
   }
 
-  return { tubes, ambientLight, update };
+  // Turn all lights off (for intro darkness)
+  function setAllOff() {
+    for (const tube of tubes) {
+      tube.on = false;
+      tube.light.intensity = 0;
+      tube.material.emissiveIntensity = 0;
+      tube.flickerPhase = 'off';
+    }
+    ambientLight.intensity = 0.04; // bare minimum so car silhouette is visible
+  }
+
+  // Stagger tubes coming on (called when intro reveals the scene)
+  function triggerPowerOn() {
+    ambientLight.intensity = 0.6;
+    for (let i = 0; i < tubes.length; i++) {
+      const tube = tubes[i];
+      if (tube.dead) continue;
+      const delay = i * 180 + Math.random() * 250;
+      setTimeout(() => {
+        tube.flickerPhase = 'powering-on';
+        tube.flickerTimer = 0;
+        tube.flickerDuration = 0.4 + Math.random() * 0.6;
+      }, delay);
+    }
+  }
+
+  // Kill a tube permanently (for environmental atmosphere)
+  function killTube(index) {
+    const tube = tubes[index];
+    if (!tube) return;
+    tube.dead = true;
+    tube.on = false;
+    tube.light.intensity = 0;
+    tube.material.emissiveIntensity = 0;
+    tube.material.emissive.setHex(0x1a1810);
+    tube.material.color.setHex(0x2a2820);
+  }
+
+  return { tubes, ambientLight, update, setAllOff, triggerPowerOn, killTube };
 }

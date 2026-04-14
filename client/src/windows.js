@@ -7,12 +7,15 @@ const LIGHT_SPACING = 4;
 const SCROLL_SPEED = 12;
 
 const tunnelWallMat = new THREE.MeshStandardMaterial({ color: 0x1a1510, roughness: 1.0 });
+const tunnelWallLightMat = new THREE.MeshStandardMaterial({ color: 0x221d15, roughness: 1.0 });
 const tunnelLightMat = new THREE.MeshStandardMaterial({
   color: 0xffcc66,
   emissive: 0xffaa33,
   emissiveIntensity: 0.6,
 });
 const cableMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
+const graffitiColors = [0xcc3333, 0x3366cc, 0x33aa33, 0xcccc33, 0xcc66cc, 0xff6633];
+const crossPassageMat = new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 1.0 });
 
 export function createTunnelView(scene) {
   const tunnelGroup = new THREE.Group();
@@ -90,6 +93,80 @@ export function createTunnelView(scene) {
     }
   }
 
+  // Graffiti tags on tunnel walls (small colored patches that scroll past)
+  const graffitiTags = [];
+  const GRAFFITI_COUNT = 12;
+  const GRAFFITI_SPAN = GRAFFITI_COUNT * 6;
+  for (let i = 0; i < GRAFFITI_COUNT; i++) {
+    const z = (i - GRAFFITI_COUNT / 2) * 6 + Math.random() * 2;
+    const xSign = Math.random() > 0.5 ? -1 : 1;
+    const wallX = xSign * (HALF_WIDTH + 0.44);
+    const tagW = 0.3 + Math.random() * 0.5;
+    const tagH = 0.1 + Math.random() * 0.2;
+    const tagColor = graffitiColors[Math.floor(Math.random() * graffitiColors.length)];
+
+    const tagMat = new THREE.MeshStandardMaterial({
+      color: tagColor,
+      roughness: 0.9,
+      transparent: true,
+      opacity: 0.3 + Math.random() * 0.3,
+    });
+    const tag = new THREE.Mesh(new THREE.PlaneGeometry(tagW, tagH), tagMat);
+    tag.position.set(wallX, 0.6 + Math.random() * 1.0, z);
+    tag.rotation.y = xSign === -1 ? Math.PI / 2 : -Math.PI / 2;
+    tunnelGroup.add(tag);
+    graffitiTags.push(tag);
+  }
+
+  // Cross-passage openings (dark rectangular gaps in tunnel wall)
+  const crossPassages = [];
+  const PASSAGE_COUNT = 4;
+  const PASSAGE_SPAN = PASSAGE_COUNT * 16;
+  for (let i = 0; i < PASSAGE_COUNT; i++) {
+    const z = (i - PASSAGE_COUNT / 2) * 16;
+    const xSign = i % 2 === 0 ? -1 : 1;
+    const wallX = xSign * (HALF_WIDTH + 0.44);
+
+    const passage = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.8, 1.8),
+      crossPassageMat,
+    );
+    passage.position.set(wallX, 0.9, z);
+    passage.rotation.y = xSign === -1 ? Math.PI / 2 : -Math.PI / 2;
+    tunnelGroup.add(passage);
+    crossPassages.push(passage);
+  }
+
+  // Wall section color variation (alternate lighter/darker patches)
+  const wallPatches = [];
+  const PATCH_COUNT = 10;
+  const PATCH_SPAN = PATCH_COUNT * 5;
+  for (let i = 0; i < PATCH_COUNT; i++) {
+    const z = (i - PATCH_COUNT / 2) * 5;
+    for (const xSign of [-1, 1]) {
+      const wallX = xSign * (HALF_WIDTH + 0.44);
+      const patch = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.01, CAR_HEIGHT * 0.7, 2.5),
+        tunnelWallLightMat,
+      );
+      patch.position.set(wallX, CAR_HEIGHT * 0.35, z);
+      patch.rotation.y = xSign === -1 ? Math.PI / 2 : -Math.PI / 2;
+      tunnelGroup.add(patch);
+      wallPatches.push(patch);
+    }
+  }
+
+  // Window reflection overlays (faint warm tint on the inside of each window)
+  const reflectionMat = new THREE.MeshStandardMaterial({
+    color: 0xffe8c0,
+    transparent: true,
+    opacity: 0.04,
+    roughness: 0.1,
+    metalness: 0.3,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+
   scene.add(tunnelGroup);
 
   // Scroll offset tracker
@@ -120,7 +197,35 @@ export function createTunnelView(scene) {
       if (z > totalPillarSpan / 2) z -= totalPillarSpan;
       pillars[i].position.z = z;
     }
+
+    // Move graffiti tags
+    for (let i = 0; i < graffitiTags.length; i++) {
+      const baseZ = (i - GRAFFITI_COUNT / 2) * 6;
+      let z = baseZ - (scrollOffset % GRAFFITI_SPAN);
+      if (z < -GRAFFITI_SPAN / 2) z += GRAFFITI_SPAN;
+      if (z > GRAFFITI_SPAN / 2) z -= GRAFFITI_SPAN;
+      graffitiTags[i].position.z = z;
+    }
+
+    // Move cross-passages
+    for (let i = 0; i < crossPassages.length; i++) {
+      const baseZ = (i - PASSAGE_COUNT / 2) * 16;
+      let z = baseZ - (scrollOffset % PASSAGE_SPAN);
+      if (z < -PASSAGE_SPAN / 2) z += PASSAGE_SPAN;
+      if (z > PASSAGE_SPAN / 2) z -= PASSAGE_SPAN;
+      crossPassages[i].position.z = z;
+    }
+
+    // Move wall patches
+    for (let i = 0; i < wallPatches.length; i++) {
+      const baseI = Math.floor(i / 2);
+      const baseZ = (baseI - PATCH_COUNT / 2) * 5;
+      let z = baseZ - (scrollOffset % PATCH_SPAN);
+      if (z < -PATCH_SPAN / 2) z += PATCH_SPAN;
+      if (z > PATCH_SPAN / 2) z -= PATCH_SPAN;
+      wallPatches[i].position.z = z;
+    }
   }
 
-  return { update, tunnelGroup };
+  return { update, tunnelGroup, reflectionMat };
 }

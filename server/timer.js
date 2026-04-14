@@ -30,9 +30,7 @@ export function startTimer(room, io) {
 
     io.to(room.code).emit('timer-update', {
       elapsed,
-      totalTime: TOTAL_TIME,
       stationIndex,
-      stations: STATIONS,
     });
 
     if (elapsed >= TOTAL_TIME) {

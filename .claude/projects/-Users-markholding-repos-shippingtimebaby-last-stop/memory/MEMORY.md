@@ -1,0 +1,1 @@
+- [No camera sway](feedback_no_camera_sway.md) — user rejects camera sway/shake/jolts, causes motion sickness
