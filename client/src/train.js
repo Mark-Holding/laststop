@@ -25,6 +25,7 @@ const SEAT_BACK_HEIGHT = 0.5;
 const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
 const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x7a7a70, roughness: 0.7 });
 const wallMat = new THREE.MeshStandardMaterial({ color: 0x8a8878, roughness: 0.8 });
+const lowerWallMat = new THREE.MeshStandardMaterial({ color: 0x969486, roughness: 0.8 });
 const seatMat = new THREE.MeshStandardMaterial({ color: 0x1e3050, roughness: 0.6 });
 const poleMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.8, roughness: 0.3 });
 const doorMat = new THREE.MeshStandardMaterial({ color: 0x555560, metalness: 0.5, roughness: 0.5 });
@@ -65,7 +66,7 @@ function createWallSide(group, side) {
   // Lower wall panel (below windows)
   const lowerWall = new THREE.Mesh(
     new THREE.BoxGeometry(WALL_THICKNESS, WINDOW_BOTTOM, CAR_LENGTH),
-    wallMat
+    lowerWallMat
   );
   lowerWall.position.set(wallX, WINDOW_BOTTOM / 2, 0);
   group.add(lowerWall);

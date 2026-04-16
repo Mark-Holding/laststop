@@ -1,6 +1,7 @@
 export function validatePuzzleAction(room, action, socketId) {
   const car = action.car || room.gameState.currentCar;
   if (car === 1) return validateCar1Action(room, action, socketId);
+  if (car === 2) return validateCar2Action(room, action, socketId);
   return { valid: false, reason: 'Unknown car' };
 }
 
@@ -60,7 +61,8 @@ function validateCar1Action(room, action, socketId) {
       if (!state.seatLiftedBy) {
         return { valid: false, reason: 'Seat not lifted' };
       }
-      if (state.seatLiftedBy === socketId) {
+      // Solo mode: the seat stays propped so the lifter can also grab the phone.
+      if (!room.gameState.soloMode && state.seatLiftedBy === socketId) {
         return {
           valid: false,
           reason: 'You are holding the seat — another player must grab the phone',
@@ -152,6 +154,7 @@ function validateCar1Action(room, action, socketId) {
       }
       state.doorSwiped = true;
       state.completed = true;
+      room.gameState.currentCar = 2;
       events.push({ event: 'door-unlocked' });
       events.push({ event: 'car-completed', car: 1 });
       return { valid: true, events };
@@ -162,23 +165,29 @@ function validateCar1Action(room, action, socketId) {
   }
 }
 
-export function getCar1Hints(config, state, tier) {
+export function getCar1Hints(config, state, tier, soloMode = false) {
   // Hints adapt to current puzzle progress
   if (!state.phoneGrabbedBy) {
     switch (tier) {
       case 1:
         return "Listen carefully... there's a buzzing sound somewhere in this car. Follow your ears.";
       case 2:
-        return `Check under the seats on the ${config.phoneSide === 0 ? 'left' : 'right'} side. One player needs to lift the seat while another reaches underneath.`;
+        return soloMode
+          ? `Check under the seats on the ${config.phoneSide === 0 ? 'left' : 'right'} side. Lift the right one — it'll stay propped up so you can grab what's underneath.`
+          : `Check under the seats on the ${config.phoneSide === 0 ? 'left' : 'right'} side. One player needs to lift the seat while another reaches underneath.`;
       case 3:
-        return `The phone is under seat section ${config.phoneSection + 1} on the ${config.phoneSide === 0 ? 'left' : 'right'} side. One player presses E on the seat to lift it, then a DIFFERENT player presses E on the phone.`;
+        return soloMode
+          ? `The phone is under seat section ${config.phoneSection + 1} on the ${config.phoneSide === 0 ? 'left' : 'right'} side. Press E on the seat to lift it, then press E on the phone.`
+          : `The phone is under seat section ${config.phoneSection + 1} on the ${config.phoneSide === 0 ? 'left' : 'right'} side. One player presses E on the seat to lift it, then a DIFFERENT player presses E on the phone.`;
     }
   } else if (!state.phoneUnlocked) {
     switch (tier) {
       case 1:
         return 'Look at the windows on the opposite side of the car from where you found the phone. Something is scratched into the glass.';
       case 2:
-        return `There are scratch marks on a window on the ${config.scratchSide === 0 ? 'left' : 'right'} side that form the unlock pattern. Have someone describe it to the phone holder.`;
+        return soloMode
+          ? `There are scratch marks on a window on the ${config.scratchSide === 0 ? 'left' : 'right'} side that form the unlock pattern. Walk over and memorise it, then enter it on the phone.`
+          : `There are scratch marks on a window on the ${config.scratchSide === 0 ? 'left' : 'right'} side that form the unlock pattern. Have someone describe it to the phone holder.`;
       case 3:
         return `The pattern is: ${config.lockPattern.join(' -> ')} on the 3x3 grid (0=top-left, 2=top-right, 6=bottom-left, 8=bottom-right).`;
     }
@@ -202,6 +211,76 @@ export function getCar1Hints(config, state, tier) {
     }
   }
   return "You've completed this car's puzzle!";
+}
+
+// =========================================================
+// CAR 2 — "The Route"
+// =========================================================
+
+function validateCar2Action(room, action, socketId) {
+  const config = room.gameState.puzzleConfigs.car2;
+  const state = room.gameState.carStates.car2;
+  const events = [];
+
+  switch (action.type) {
+    case 'enter-code': {
+      if (state.completed) {
+        return { valid: false, reason: 'Already solved' };
+      }
+      const now = Date.now();
+      if (state.lockoutUntil > now) {
+        const remaining = Math.ceil((state.lockoutUntil - now) / 1000);
+        return { valid: false, reason: `Keypad locked — ${remaining}s remaining` };
+      }
+      const submitted = String(action.code || '');
+      if (submitted.length !== config.code.length || !/^\d+$/.test(submitted)) {
+        return { valid: false, reason: 'Invalid code format' };
+      }
+      if (submitted !== config.code) {
+        state.wrongAttempts += 1;
+        const lockoutSeconds = 30;
+        state.lockoutUntil = now + lockoutSeconds * 1000;
+        events.push({
+          event: 'code-wrong',
+          attempts: state.wrongAttempts,
+          lockoutSeconds,
+          by: socketId,
+        });
+        return { valid: true, events };
+      }
+      state.completed = true;
+      room.gameState.currentCar = 3;
+      events.push({ event: 'code-correct', by: socketId });
+      events.push({ event: 'door-unlocked' });
+      events.push({ event: 'car-completed', car: 2 });
+      return { valid: true, events };
+    }
+    default:
+      return { valid: false, reason: 'Unknown action type' };
+  }
+}
+
+export function getCar2Hints(config, state, tier, soloMode = false) {
+  void soloMode; // car 2 is already solo-friendly (see GAME_DESIGN.md)
+  if (!state.completed) {
+    switch (tier) {
+      case 1:
+        return 'Three clues are scattered around this car: a subway map on the wall, a newspaper on a seat with a half-finished crossword, and a torn ticket stub on the floor. Find all three.';
+      case 2:
+        return 'Only stations that appear BOTH circled on the map AND filled in the crossword count. The ticket shows the transfer ORDER. Read the line numbers next to those stations on the map in the ticket order to form the code.';
+      case 3: {
+        const sequence = config.routeOrder
+          .map((s) => `${s} (line ${config.lineAssignments[s]})`)
+          .join(' → ');
+        return `Route in order: ${sequence}. Code is ${config.code}. Enter it at the keypad by the front door.`;
+      }
+    }
+  }
+  return "You've completed this car's puzzle!";
+}
+
+export function handleCar2Disconnect(/* room, socketId, io, code */) {
+  // Car 2 has no per-player held state to release
 }
 
 export function handleCar1Disconnect(room, socketId, io, code) {

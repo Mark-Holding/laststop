@@ -1,11 +1,12 @@
 export class PuzzleBase {
-  constructor(scene, camera, socket, layout, playerController, doors) {
+  constructor(scene, camera, socket, layout, playerController, doors, soloMode = false) {
     this.scene = scene;
     this.camera = camera;
     this.socket = socket;
     this.layout = layout;
     this.player = playerController;
     this.doors = doors;
+    this.soloMode = !!soloMode;
     this.objects = [];
     this.disposed = false;
   }

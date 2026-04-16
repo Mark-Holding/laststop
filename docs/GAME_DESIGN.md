@@ -5,7 +5,7 @@
 **Title:** Last Stop
 **Genre:** Multiplayer co-op escape room thriller
 **Platform:** Web browser (Three.js)
-**Players:** 2-4 (co-op)
+**Players:** 1-4 (co-op primary, solo supported via adapted puzzles)
 **Target Session Length:** 25-35 minutes
 **Competition:** 2026 Vibe Jam (Deadline: 1 May 2026 @ 13:37 UTC)
 
@@ -41,6 +41,33 @@ Each car has an emergency intercom styled "help" button.
 - **Press 3:** Full answer revealed — +120 second penalty
 
 Hints are per-car. The hint button has a visual cooldown and an audio cue (intercom crackle) so it feels diegetic.
+
+## Solo Mode
+
+The game is co-op first, but supports 1-player runs. `soloMode` is set at game start (`players.length === 1`) and frozen for the session — mid-run joins don't flip it. The server branches validation on this flag; each puzzle provides a solo adaptation.
+
+### Design primitives
+
+Three patterns cover every co-op requirement across the 8 cars. Apply whichever fits when designing a new car:
+
+1. **Hold → prop.** Actions that require a second player to hold something (lifted seat, braced wire, pulled handle) become "propped" in solo — the object auto-latches after a single interact, or a visible prop (broomstick, wedge, rope) can be placed. Co-op: latch disabled; holding requires a second player's proximity.
+2. **Simultaneous → sequential-with-window.** N-player concurrent actions become "activate A, then B within X seconds" in solo. The window should be generous enough that a single player can physically traverse between activation points but tight enough that it still feels tense. Server validates both the concurrent and sequential paths against the same `soloMode` flag.
+3. **Cross-barrier comms → relay.** Puzzles built on communication across a physical split (Car 7) need the barrier removed or a recorder/notebook mechanic that captures one side's info so the solo player can carry it across.
+
+### Per-car adaptation notes
+
+- **Car 1 — The Dead Phone.** Hold → prop. Lifted seat stays propped in solo so the same player can grab the phone. Implemented.
+- **Car 2 — The Route.** Already walkable solo (3 clue sources are just physically distributed). No adaptation needed — solo players read all three in sequence.
+- **Car 3 — The Passengers.** Already solo-compatible. The "simultaneous swap collision reset" penalty only triggers with 2+ players, so solo just takes more moves.
+- **Car 4 — The Blackout.** Two adaptations needed: (a) the 2-second light flash is too short for a solo player to map 8 symbols — in solo, give 3-4 seconds or slow the strobe period; (b) the door's two-handle-plus-button finale becomes sequential (pull handle A → pull handle B → press button, with a timing window).
+- **Car 5 — The Wire Room.** Three ad clues are fine solo (just slower to read). Door-opening pipe leverage becomes a single-player timed input (hold-and-rotate) in solo.
+- **Car 6 — The Frequency.** Biggest change: proximity audio currently gives different players different audio quality. In solo, play the combined/full audio to the one player at reduced static as they fix each junction. Wiring connection becomes a single-player interact instead of hold-while-screw.
+- **Car 7 — The Divide.** REQUIRES REDESIGN. The "barrier splits the team" premise doesn't translate to solo. Options: (a) drop the security gate entirely in solo and let the player walk both sides sequentially; (b) replace the barrier with a one-way mirror / intercom — player places a recorder on one side, crosses, plays it back. Prefer (a) for jam simplicity; revisit (b) post-jam.
+- **Car 8 — The Driver's Door.** Deadbolt's 3-handle simultaneous turn becomes sequential-with-window in solo. The 7-digit hidden-number code is unchanged — observation rewards apply equally. Final disarm is already a single-player action.
+
+### Leaderboard
+
+Solo and co-op entries share one `leaderboard` table (the existing `player_count` column records which). Solo will naturally rank lower due to slower puzzle traversal — no separate board needed for the jam. Consider a `player_count=1` filter view post-jam if solo becomes popular.
 
 ## Setting and Art Direction
 

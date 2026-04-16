@@ -165,7 +165,7 @@ function createStickerTexture(code) {
 
 // --- Lock Pattern UI ---
 
-function createLockPatternUI(onSubmit) {
+function createLockPatternUI(onSubmit, onClose) {
   const overlay = document.createElement('div');
   overlay.style.cssText =
     'position:fixed;inset:0;display:none;z-index:300;' +
@@ -173,7 +173,7 @@ function createLockPatternUI(onSubmit) {
 
   const phone = document.createElement('div');
   phone.style.cssText =
-    'width:260px;height:420px;background:#111;border-radius:20px;' +
+    'width:260px;height:460px;background:#111;border-radius:20px;' +
     'border:2px solid #333;padding:16px;display:flex;flex-direction:column;' +
     'font-family:monospace;color:#ccc;';
 
@@ -201,12 +201,22 @@ function createLockPatternUI(onSubmit) {
     'flex:1;padding:8px;background:#333;border:none;color:#aaa;' +
     'border-radius:5px;font-family:monospace;cursor:pointer;font-size:13px;';
 
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'CLOSE (ESC)';
+  closeBtn.style.cssText =
+    'margin-top:8px;padding:8px;background:#333;border:none;color:#aaa;' +
+    'border-radius:5px;font-family:monospace;cursor:pointer;font-size:12px;';
+
   const feedback = document.createElement('div');
   feedback.style.cssText =
     'text-align:center;margin-top:8px;font-size:12px;color:#ff4444;min-height:16px;';
 
+  const hint = document.createElement('div');
+  hint.style.cssText = 'text-align:center;font-size:11px;color:#555;margin-top:4px;';
+  hint.textContent = 'Press P to re-open phone';
+
   btnRow.append(clearBtn, submitBtn);
-  phone.append(title, canvas, btnRow, feedback);
+  phone.append(title, canvas, btnRow, closeBtn, feedback, hint);
   overlay.appendChild(phone);
 
   // Pattern state
@@ -284,6 +294,20 @@ function createLockPatternUI(onSubmit) {
     onSubmit([...selected]);
   });
 
+  function close() {
+    overlay.style.display = 'none';
+    if (onClose) onClose();
+  }
+
+  closeBtn.addEventListener('click', close);
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape' && overlay.style.display === 'flex') {
+      close();
+    }
+  }
+  document.addEventListener('keydown', onKeyDown);
+
   function show() {
     overlay.style.display = 'flex';
     selected.length = 0;
@@ -313,7 +337,14 @@ function createLockPatternUI(onSubmit) {
 
   document.body.appendChild(overlay);
 
-  return { show, hide, showError, el: overlay, get isOpen() { return overlay.style.display === 'flex'; } };
+  return {
+    show,
+    hide,
+    showError,
+    el: overlay,
+    get isOpen() { return overlay.style.display === 'flex'; },
+    destroy() { document.removeEventListener('keydown', onKeyDown); },
+  };
 }
 
 // --- Text Messages UI ---
@@ -401,7 +432,7 @@ function createTextsUI(phoneCodePart, targetTag, onClose) {
 
 // --- Code Entry UI ---
 
-function createCodeEntryUI(stickerCode, onSubmit) {
+function createCodeEntryUI(stickerCode, onSubmit, onClose) {
   const overlay = document.createElement('div');
   overlay.style.cssText =
     'position:fixed;inset:0;display:none;z-index:300;' +
@@ -461,14 +492,24 @@ function createCodeEntryUI(stickerCode, onSubmit) {
     onSubmit(currentCompIdx, input.value);
   });
 
+  function close() {
+    overlay.style.display = 'none';
+    if (onClose) onClose();
+  }
+
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitBtn.click();
-    if (e.key === 'Escape') overlay.style.display = 'none';
+    if (e.key === 'Escape') close();
   });
 
-  cancelBtn.addEventListener('click', () => {
-    overlay.style.display = 'none';
-  });
+  cancelBtn.addEventListener('click', close);
+
+  function onGlobalKeyDown(e) {
+    if (e.key === 'Escape' && overlay.style.display === 'flex') {
+      close();
+    }
+  }
+  document.addEventListener('keydown', onGlobalKeyDown);
 
   document.body.appendChild(overlay);
 
@@ -487,6 +528,7 @@ function createCodeEntryUI(stickerCode, onSubmit) {
     showError(msg) { feedback.textContent = msg; },
     el: overlay,
     get isOpen() { return overlay.style.display === 'flex'; },
+    destroy() { document.removeEventListener('keydown', onGlobalKeyDown); },
   };
 }
 
@@ -495,8 +537,8 @@ function createCodeEntryUI(stickerCode, onSubmit) {
 // =========================================================
 
 export class Car1Puzzle extends PuzzleBase {
-  constructor(scene, camera, socket, layout, playerController, doors) {
-    super(scene, camera, socket, layout, playerController, doors);
+  constructor(scene, camera, socket, layout, playerController, doors, soloMode = false) {
+    super(scene, camera, socket, layout, playerController, doors, soloMode);
 
     this.interactables = [];
     this.seatMeshMap = new Map(); // seatIndex → cushion mesh
@@ -880,22 +922,33 @@ export class Car1Puzzle extends PuzzleBase {
 
   // --- UI Setup ---
   setupUI() {
-    this.lockPatternUI = createLockPatternUI((pattern) => {
-      this.socket.emit('puzzle-action', {
-        car: 1,
-        type: 'submit-pattern',
-        pattern,
-      });
-    });
+    this.lockPatternUI = createLockPatternUI(
+      (pattern) => {
+        this.socket.emit('puzzle-action', {
+          car: 1,
+          type: 'submit-pattern',
+          pattern,
+        });
+      },
+      () => {
+        this.player.setUIBlocking(false);
+      }
+    );
 
-    this.codeEntryUI = createCodeEntryUI(this.layout.stickerCode, (compIdx, code) => {
-      this.socket.emit('puzzle-action', {
-        car: 1,
-        type: 'enter-code',
-        compartmentIndex: compIdx,
-        code,
-      });
-    });
+    this.codeEntryUI = createCodeEntryUI(
+      this.layout.stickerCode,
+      (compIdx, code) => {
+        this.socket.emit('puzzle-action', {
+          car: 1,
+          type: 'enter-code',
+          compartmentIndex: compIdx,
+          code,
+        });
+      },
+      () => {
+        this.player.setUIBlocking(false);
+      }
+    );
   }
 
   // --- Socket event listeners ---
@@ -1039,14 +1092,15 @@ export class Car1Puzzle extends PuzzleBase {
   handlePhoneInteract() {
     if (!this.phoneMesh.visible) return;
     if (this.state.phoneGrabbedBy) {
-      // Already grabbed — if we own it and it's unlocked, re-open texts
-      if (
-        this.state.phoneGrabbedBy === this.socket.id &&
-        this.state.phoneUnlocked &&
-        this.textsUI
-      ) {
-        this.player.setUIBlocking(true);
-        this.textsUI.show();
+      // Already grabbed — if we own it, re-open the relevant screen
+      if (this.state.phoneGrabbedBy === this.socket.id) {
+        if (this.state.phoneUnlocked && this.textsUI) {
+          this.player.setUIBlocking(true);
+          this.textsUI.show();
+        } else if (!this.state.phoneUnlocked && this.lockPatternUI) {
+          this.player.setUIBlocking(true);
+          this.lockPatternUI.show();
+        }
       }
       return;
     }
@@ -1253,15 +1307,17 @@ export class Car1Puzzle extends PuzzleBase {
     super.dispose();
 
     // Remove UI DOM elements
-    if (this.lockPatternUI && this.lockPatternUI.el) {
-      this.lockPatternUI.el.remove();
+    if (this.lockPatternUI) {
+      if (this.lockPatternUI.destroy) this.lockPatternUI.destroy();
+      if (this.lockPatternUI.el) this.lockPatternUI.el.remove();
     }
     if (this.textsUI) {
       if (this.textsUI.destroy) this.textsUI.destroy();
       if (this.textsUI.el) this.textsUI.el.remove();
     }
-    if (this.codeEntryUI && this.codeEntryUI.el) {
-      this.codeEntryUI.el.remove();
+    if (this.codeEntryUI) {
+      if (this.codeEntryUI.destroy) this.codeEntryUI.destroy();
+      if (this.codeEntryUI.el) this.codeEntryUI.el.remove();
     }
     const shakeStyle = document.getElementById('puzzle-shake-style');
     if (shakeStyle) shakeStyle.remove();

@@ -251,6 +251,14 @@ export function createHUD() {
     setTimeout(() => { hintPenaltyEl.textContent = ''; }, 5000);
   }
 
+  function resetHintTiers() {
+    usedTiers = 0;
+    tierBtns.forEach((btn) => { btn.disabled = false; });
+    hintTextEl.style.display = 'none';
+    hintTextEl.textContent = '';
+    hintPenaltyEl.textContent = '';
+  }
+
   return {
     show() {
       hud.style.display = 'block';
@@ -265,6 +273,7 @@ export function createHUD() {
     setTimerConfig,
     setHintCallback,
     showHint,
+    resetHintTiers,
     toggleHintPanel() {
       hintPanelOpen = !hintPanelOpen;
       hintPanel.style.display = hintPanelOpen ? 'block' : 'none';

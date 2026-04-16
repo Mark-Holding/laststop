@@ -41,7 +41,7 @@ See @docs/GAME_DESIGN.md for full game design document.
 
 ## IMPORTANT — Gameplay Rules
 - Every puzzle MUST be procedurally generated (no fixed answers across sessions)
-- Every puzzle MUST require 2+ players to solve cooperatively
+- Every puzzle MUST require 2+ players in co-op mode, AND provide a solo adaptation (see GAME_DESIGN.md "Solo Mode" — primitives: hold→prop, simultaneous→sequential-with-window, cross-barrier→relay)
 - Every car has exactly ONE hidden number for the meta-puzzle (not part of main puzzle)
 - The train progress timer MUST always be visible and ticking — never break it
 - Hint system: 3 tiers per car, each tier adds score penalty (+30s, +60s, +120s)

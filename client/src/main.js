@@ -9,6 +9,7 @@ import { updateInteractables, Interactable, clearInteractables } from './interac
 import { createMenu } from './ui/menu.js';
 import { createHUD } from './ui/hud.js';
 import { Car1Puzzle } from './puzzles/car1.js';
+import { Car2Puzzle } from './puzzles/car2.js';
 import { resumeAudio, initAudio, startAmbientSound, updateAmbientSound, stopAmbientSound } from './audio/soundManager.js';
 import {
   addRemotePlayer,
@@ -48,6 +49,11 @@ let hud = null;
 let currentPuzzle = null;
 let gameKeyHandler = null;
 let resizeHandler = null;
+let currentCar = 1;
+let puzzleLayoutCache = null;
+let carJustCompleted = false;
+let transitioning = false;
+let isSoloGame = false;
 
 // New system instances
 let intercom = null;
@@ -168,6 +174,13 @@ socket.on('puzzle-invalid', () => {
   wrongAnswerEffect();
 });
 
+// --- Car completion → trigger transition when player walks through the door ---
+socket.on('puzzle-update', (data) => {
+  if (data && data.event === 'car-completed' && data.car === currentCar) {
+    carJustCompleted = true;
+  }
+});
+
 // --- Station LED flash ---
 function flashStationLED(stationIndex) {
   if (!stationLED) return;
@@ -179,7 +192,9 @@ function flashStationLED(stationIndex) {
 }
 
 // --- Game init ---
-function startGame({ players, timerState, puzzleLayout }) {
+function startGame({ players, timerState, puzzleLayout, soloMode }) {
+  const isSolo = !!soloMode;
+  isSoloGame = isSolo;
   // Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -258,14 +273,20 @@ function startGame({ players, timerState, puzzleLayout }) {
     );
   }
 
+  // Puzzle layouts (held for later car transitions)
+  puzzleLayoutCache = puzzleLayout || null;
+  currentCar = 1;
+  carJustCompleted = false;
+  transitioning = false;
+
   // Car 1 puzzle
   if (puzzleLayout && puzzleLayout.car1) {
-    currentPuzzle = new Car1Puzzle(scene, camera, socket, puzzleLayout.car1, player, doors);
+    currentPuzzle = new Car1Puzzle(scene, camera, socket, puzzleLayout.car1, player, doors, isSolo);
   }
 
-  // Hint system wiring
-  hud.setHintCallback((tier) => {
-    socket.emit('hint-request', { car: 1 });
+  // Hint system wiring — car number follows currentCar
+  hud.setHintCallback(() => {
+    socket.emit('hint-request', { car: currentCar });
   });
 
   // --- Visual polish systems ---
@@ -308,21 +329,21 @@ function startGame({ players, timerState, puzzleLayout }) {
       hud.toggleHintPanel();
     }
     if (event.code === 'Escape' && currentPuzzle) {
-      let closedSomething = false;
-      if (currentPuzzle.lockPatternUI && currentPuzzle.lockPatternUI.isOpen) {
-        currentPuzzle.lockPatternUI.hide();
-        closedSomething = true;
-      }
-      if (currentPuzzle.textsUI && currentPuzzle.textsUI.isOpen) {
-        currentPuzzle.textsUI.hide();
-        closedSomething = true;
-      }
-      if (currentPuzzle.codeEntryUI && currentPuzzle.codeEntryUI.isOpen) {
-        currentPuzzle.codeEntryUI.hide();
-        closedSomething = true;
-      }
-      if (closedSomething) {
-        player.setUIBlocking(false);
+      const uis = [
+        currentPuzzle.lockPatternUI,
+        currentPuzzle.textsUI,
+        currentPuzzle.codeEntryUI,
+        currentPuzzle.mapUI,
+        currentPuzzle.newspaperUI,
+        currentPuzzle.ticketUI,
+        currentPuzzle.keypadUI,
+      ];
+      for (const ui of uis) {
+        if (ui && ui.isOpen) {
+          ui.hide();
+          player.setUIBlocking(false);
+          break;
+        }
       }
     }
     if (event.code === 'KeyP' && currentPuzzle && currentPuzzle.textsUI) {
@@ -420,6 +441,79 @@ function createStationLED(scene) {
   stationLED.userData.texture = texture;
 }
 
+// --- Fade-to-black transition into the next car ---
+function transitionToCar(nextCar) {
+  const fade = document.createElement('div');
+  fade.style.cssText =
+    'position:fixed;inset:0;background:#000;z-index:900;opacity:0;' +
+    'transition:opacity 0.6s ease;pointer-events:none;' +
+    'display:flex;align-items:center;justify-content:center;' +
+    'color:#aaa;font-family:"Courier New",monospace;font-size:14px;letter-spacing:3px;';
+  fade.textContent = `CAR ${nextCar}`;
+  document.body.appendChild(fade);
+  requestAnimationFrame(() => { fade.style.opacity = '1'; });
+
+  // Block input during the blackout
+  if (player) player.setUIBlocking(true);
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  setTimeout(() => {
+    swapToCarPuzzle(nextCar);
+    // Fade back in after the swap
+    setTimeout(() => {
+      fade.style.opacity = '0';
+      setTimeout(() => {
+        fade.remove();
+        if (player) player.setUIBlocking(false);
+        transitioning = false;
+        if (renderer) renderer.domElement.requestPointerLock();
+      }, 700);
+    }, 200);
+  }, 700);
+}
+
+function swapToCarPuzzle(nextCar) {
+  // Dispose current puzzle
+  if (currentPuzzle && currentPuzzle.dispose) currentPuzzle.dispose();
+  currentPuzzle = null;
+
+  // Rebuild per-car environment
+  if (carEnvironment) { carEnvironment.dispose(); carEnvironment = null; }
+  carEnvironment = createCarEnvironment(scene, nextCar);
+
+  // Reset doors (new car has both doors locked again)
+  if (doors) {
+    doors.reset('front');
+    doors.reset('back');
+  }
+
+  // Move player to the back of the (reused) car geometry
+  if (camera) {
+    camera.position.set(0, 1.6, 6);
+  }
+
+  // Reset hint tiers for the new car
+  if (hud && hud.resetHintTiers) hud.resetHintTiers();
+
+  // Update tension / intercom to new car number
+  setCurrentCar(nextCar);
+
+  // Kill another fluorescent each car advance — cumulative decay as tension rises
+  if (lighting && lighting.tubes && lighting.tubes.length) {
+    const killIdx = (nextCar * 3) % lighting.tubes.length;
+    lighting.killTube(killIdx);
+  }
+
+  // Spawn the next car's puzzle
+  currentCar = nextCar;
+  const layout = puzzleLayoutCache && puzzleLayoutCache[`car${nextCar}`];
+  if (!layout) return;
+
+  if (nextCar === 2) {
+    currentPuzzle = new Car2Puzzle(scene, camera, socket, layout, player, doors, isSoloGame);
+  }
+}
+
 function cleanupGame() {
   if (resizeHandler) {
     window.removeEventListener('resize', resizeHandler);
@@ -512,6 +606,20 @@ function animate() {
   if (carTransition) {
     carTransition.update(dt, camera.position.z);
     carTransition.checkPlayerPosition(camera.position.z, -HALF_LENGTH, -HALF_LENGTH - 2.5);
+  }
+
+  // Trigger car-to-car transition when the player walks into the open front door
+  if (
+    carJustCompleted &&
+    !transitioning &&
+    doors &&
+    doors.frontDoor.open &&
+    doors.frontDoor.openAmount > 0.9 &&
+    camera.position.z < -HALF_LENGTH + 0.4
+  ) {
+    transitioning = true;
+    carJustCompleted = false;
+    transitionToCar(currentCar + 1);
   }
 
   // Dust particles (opacity tracks lit tubes)

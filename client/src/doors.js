@@ -89,6 +89,16 @@ export function createDoors(scene) {
     playDoorSlide();
   }
 
+  function reset(which) {
+    const door = which === 'front' ? frontDoor : backDoor;
+    door.locked = true;
+    door.open = false;
+    door.openAmount = 0;
+    door.panel.position.x = 0;
+    door.statusLight.material = lockedLightMat.clone();
+    door.glow.color.set(0xff2200);
+  }
+
   function update(dt) {
     for (const door of [frontDoor, backDoor]) {
       if (door.open && door.openAmount < 1) {
@@ -103,6 +113,7 @@ export function createDoors(scene) {
     backDoor,
     unlock,
     openDoor,
+    reset,
     update,
   };
 }

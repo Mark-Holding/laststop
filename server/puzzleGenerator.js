@@ -189,3 +189,160 @@ export function createCar1State() {
   };
 }
 
+// =========================================================
+// CAR 2 — "The Route"
+// =========================================================
+
+// Short NYC station names — fit comfortably on crossword clues and map labels
+const STATION_POOL = [
+  'CANAL', 'ASTOR', 'FULTON', 'BOWERY', 'HOUSTON', 'DELANCEY',
+  'CHAMBERS', 'SPRING', 'PRINCE', 'NASSAU', 'CORTLANDT', 'BLEECKER',
+];
+
+function shuffleInPlace(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+export function generateCar2(seed) {
+  // Different sub-seed from car 1 so each car randomizes independently
+  const rng = mulberry32(seed ^ 0x5ca71e);
+
+  const stations = shuffleInPlace([...STATION_POOL], rng);
+  const realStations = stations.slice(0, 6);
+  const mapDecoys = stations.slice(6, 9);
+  const crosswordDecoys = stations.slice(9, 12);
+
+  // Line numbers 1-9. Real stations get unique-ish lines so the code is varied.
+  const lineAssignments = {};
+  for (const s of [...realStations, ...mapDecoys, ...crosswordDecoys]) {
+    lineAssignments[s] = seededInt(rng, 1, 9);
+  }
+
+  // Route order (what the ticket shows)
+  const routeOrder = shuffleInPlace([...realStations], rng);
+
+  // 6-digit code: concatenated line numbers in route order
+  const code = routeOrder.map((s) => String(lineAssignments[s])).join('');
+
+  // Map visual: real + map-decoys all circled. Randomize on-map positions.
+  const mapStations = shuffleInPlace([...realStations, ...mapDecoys], rng);
+  const mapStationPositions = {};
+  mapStations.forEach((s, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    mapStationPositions[s] = {
+      x: 0.18 + col * 0.32 + (rng() - 0.5) * 0.06,
+      y: 0.22 + row * 0.26 + (rng() - 0.5) * 0.06,
+    };
+  });
+
+  // Crossword: real + crossword-decoys filled in, plus some empty-numbered clues for flavor.
+  const crosswordFilled = shuffleInPlace([...realStations, ...crosswordDecoys], rng);
+  const crosswordClues = [];
+  let nextClueNum = seededInt(rng, 1, 4);
+  for (let i = 0; i < crosswordFilled.length; i++) {
+    crosswordClues.push({
+      num: nextClueNum,
+      dir: rng() < 0.5 ? 'ACROSS' : 'DOWN',
+      answer: crosswordFilled[i],
+      hint: generateClueHint(crosswordFilled[i], rng),
+    });
+    nextClueNum += seededInt(rng, 1, 4);
+  }
+  // Add 2-3 empty clues for red-herring flavor
+  const blankCount = seededInt(rng, 2, 3);
+  for (let i = 0; i < blankCount; i++) {
+    crosswordClues.push({
+      num: nextClueNum,
+      dir: rng() < 0.5 ? 'ACROSS' : 'DOWN',
+      answer: '',
+      hint: 'Manhattan landmark (unsolved)',
+    });
+    nextClueNum += seededInt(rng, 1, 4);
+  }
+  crosswordClues.sort((a, b) => a.num - b.num);
+
+  // Placement in the 3D car
+  const mapSide = seededInt(rng, 0, 1);
+  const mapPanelIdx = seededInt(rng, 1, 3); // 5 ad slots; avoid very ends
+  const newspaperSeat = seededInt(rng, 0, 9);
+  // Ticket on the floor, opposite side of the map and on a different half of car
+  const ticketSide = 1 - mapSide;
+  const ticketZ = (rng() * 10 - 5);
+  const ticketX = (ticketSide === 0 ? -1 : 1) * (0.4 + rng() * 0.3);
+
+  // Hidden meta-puzzle number (Car 8)
+  const hiddenNumber = seededInt(rng, 0, 9);
+  // Hide it on a seat (different from the newspaper seat)
+  let hiddenSeat;
+  do {
+    hiddenSeat = seededInt(rng, 0, 9);
+  } while (hiddenSeat === newspaperSeat);
+
+  return {
+    realStations,
+    mapDecoys,
+    crosswordDecoys,
+    lineAssignments,
+    routeOrder,
+    code,
+    mapStations,
+    mapStationPositions,
+    crosswordClues,
+    mapSide,
+    mapPanelIdx,
+    newspaperSeat,
+    ticketZ,
+    ticketX,
+    hiddenSeat,
+    hiddenNumber,
+  };
+}
+
+// Tiny clue-hint generator — purely flavor text so the crossword reads like a real one.
+// The answer is already filled in; the hint just adds atmosphere.
+const CLUE_FLAVOR = [
+  'Lower Manhattan stop', 'Named for a street', 'Downtown transfer',
+  'On the east side', 'Former ferry terminus', 'Historic district',
+  'Near the park', 'Cast iron district', 'Near the bridge',
+  'Turn-of-century name', 'Commuter hub', 'Greenwich Village',
+];
+function generateClueHint(_answer, rng) {
+  return CLUE_FLAVOR[Math.floor(rng() * CLUE_FLAVOR.length)];
+}
+
+export function getCar2Layout(config) {
+  // Expose line numbers only for map-circled stations — crossword shows plain words.
+  const mapLineNumbers = {};
+  for (const s of config.mapStations) {
+    mapLineNumbers[s] = config.lineAssignments[s];
+  }
+  return {
+    mapSide: config.mapSide,
+    mapPanelIdx: config.mapPanelIdx,
+    mapStations: config.mapStations,
+    mapStationPositions: config.mapStationPositions,
+    mapLineNumbers,
+    crosswordClues: config.crosswordClues,
+    routeOrder: config.routeOrder,
+    codeLength: config.code.length,
+    newspaperSeat: config.newspaperSeat,
+    ticketZ: config.ticketZ,
+    ticketX: config.ticketX,
+    hiddenSeat: config.hiddenSeat,
+    hiddenNumber: config.hiddenNumber,
+  };
+}
+
+export function createCar2State() {
+  return {
+    wrongAttempts: 0,
+    lockoutUntil: 0,
+    completed: false,
+  };
+}
+

@@ -215,13 +215,14 @@ export function createMenu({ onCreateRoom, onJoinRoom, onStartGame }) {
     startBtn.style.display = isHost ? 'block' : 'none';
 
     const count = currentPlayers.length;
-    if (isHost && count >= 2) {
-      lobbyStatus.textContent = '';
-      startBtn.disabled = false;
-    } else if (isHost && count < 2) {
-      lobbyStatus.textContent = 'Need at least 2 players to start';
-      startBtn.disabled = true;
+    if (isHost) {
+      startBtn.disabled = count < 1;
+      startBtn.textContent = count === 1 ? 'Start Solo' : 'Start Game';
+      lobbyStatus.textContent = count === 1
+        ? 'Solo run — co-op puzzles will adapt'
+        : '';
     } else {
+      startBtn.textContent = 'Start Game';
       lobbyStatus.textContent = 'Waiting for host to start...';
     }
   }

@@ -6,7 +6,13 @@ import cors from 'cors';
 import { createRoom, joinRoom, leaveRoom, getRoomBySocket } from './rooms.js';
 import { startTimer, STATIONS, TOTAL_TIME } from './timer.js';
 import { createGameState } from './gameState.js';
-import { validatePuzzleAction, getCar1Hints, handleCar1Disconnect } from './validation.js';
+import {
+  validatePuzzleAction,
+  getCar1Hints,
+  getCar2Hints,
+  handleCar1Disconnect,
+  handleCar2Disconnect,
+} from './validation.js';
 
 // Car bounds for movement validation (must match client/src/train.js)
 const CAR_HALF_WIDTH = 1.3;
@@ -123,19 +129,18 @@ io.on('connection', (socket) => {
   socket.on('start-game', () => {
     const room = getRoomBySocket(socket.id);
     if (!room || room.hostId !== socket.id || room.state !== 'waiting') return;
-    if (room.players.length < 2) {
-      socket.emit('err', { message: 'Need at least 2 players to start' });
-      return;
-    }
+    if (room.players.length < 1) return;
 
     room.state = 'playing';
     room.seed = Math.floor(Math.random() * 2147483647);
-    room.gameState = createGameState(room.seed);
+    room.soloMode = room.players.length === 1;
+    room.gameState = createGameState(room.seed, { soloMode: room.soloMode });
 
     startTimer(room, io);
 
     io.to(room.code).emit('game-started', {
       players: room.players,
+      soloMode: room.soloMode,
       timerState: {
         totalTime: TOTAL_TIME,
         stations: STATIONS,
@@ -216,7 +221,9 @@ io.on('connection', (socket) => {
 
     let hintText = null;
     if (carNum === 1) {
-      hintText = getCar1Hints(gs.puzzleConfigs.car1, gs.carStates.car1, currentTier);
+      hintText = getCar1Hints(gs.puzzleConfigs.car1, gs.carStates.car1, currentTier, gs.soloMode);
+    } else if (carNum === 2) {
+      hintText = getCar2Hints(gs.puzzleConfigs.car2, gs.carStates.car2, currentTier, gs.soloMode);
     }
     if (!hintText) return;
 
@@ -239,6 +246,7 @@ io.on('connection', (socket) => {
     // Clean up puzzle state for disconnected player
     if (room && room.gameState) {
       handleCar1Disconnect(room, socket.id, io, room.code);
+      handleCar2Disconnect(room, socket.id, io, room.code);
     }
 
     const result = leaveRoom(socket.id);
